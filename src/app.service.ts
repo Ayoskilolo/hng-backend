@@ -3,10 +3,14 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { CatFact } from './model/cat.model';
 import { AxiosResponse } from 'axios';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AppService {
-  constructor(private readonly httpService: HttpService) {}
+  constructor(
+    private readonly httpService: HttpService,
+    private readonly configService: ConfigService,
+  ) {}
   getHello(): string {
     return 'Hello World!';
   }
@@ -29,9 +33,18 @@ export class AppService {
   }
 
   async getCatFact() {
+    const catApiUrl = this.configService.get<string>('catAPI');
+
+    if (!catApiUrl) {
+      throw new HttpException(
+        'Cat API URL not configured',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+
     try {
       const catFactsResponse: AxiosResponse<CatFact> = await firstValueFrom(
-        this.httpService.get('https://catfact.ninja/fact'),
+        this.httpService.get(catApiUrl),
       );
 
       const responseData: CatFact = catFactsResponse.data;
