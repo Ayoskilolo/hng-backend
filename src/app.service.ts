@@ -5,26 +5,30 @@ import { CatFact } from './model/cat.model';
 import { AxiosResponse } from 'axios';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
+import {
+  NaturalLanguageResponse,
+  ParsedFilters,
+} from './dto/natural-language-response.dto';
+
+interface StringAnalysis {
+  value: string;
+  length: number;
+  wordCount: number;
+  palindrome: boolean;
+  uniqueChars: number;
+  freq: { [key: string]: number };
+  hash: string;
+}
 
 @Injectable()
 export class AppService {
-  private readonly stringStore = new Map<
-    string,
-    {
-      value: string;
-      length: number;
-      wordCount: number;
-      palindrome: boolean;
-      uniqueChars: number;
-      freq: { [key: string]: number };
-      hash: string;
-    }
-  >();
+  public readonly stringStore = new Map<string, any>();
 
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
   ) {}
+
   getHello(): string {
     return 'Hello World!';
   }
@@ -72,7 +76,7 @@ export class AppService {
     }
   }
 
-  getStringAnalysis(value: string) {
+  getString(value: string) {
     if (!this.stringStore.has(value)) {
       throw new HttpException('String not found', HttpStatus.NOT_FOUND);
     }
@@ -92,138 +96,207 @@ export class AppService {
       );
     }
 
-    if (value.length === 1) {
+    if (this.stringStore.has(value)) {
       throw new HttpException(
-        'valueing already exists in the system',
+        'String already exists in the system',
         HttpStatus.CONFLICT,
       );
     }
 
     const processed = this.processString(value);
-    this.stringStore.set(value, processed);
+    const response = {
+      id: processed.sha256_hash,
+      value,
+      properties: processed,
+      created_at: new Date().toISOString(),
+    };
 
-    return processed;
+    this.stringStore.set(value, response);
+
+    return response;
   }
 
-  processString(value: string): {
-    value: string;
-    length: number;
-    wordCount: number;
-    palindrome: boolean;
-    uniqueChars: number;
-    freq: { [key: string]: number };
-    hash: string;
-  } {
+  processString(value: string) {
     const length = value.length;
     const words = value.trim().split(/\s+/).filter(Boolean);
-    const wordCount = words.length;
+    const word_count = words.length;
     const reversed = value.split('').reverse().join('');
-    const palindrome = value === reversed;
-    const uniqueChars = new Set(value).size;
-    const freq: { [key: string]: number } = {};
+    const is_palindrome = value === reversed;
+    const unique_characters = new Set(value).size;
+    const character_frequency_map: { [key: string]: number } = {};
 
     for (const ch of value) {
-      freq[ch] = (freq[ch] || 0) + 1;
+      character_frequency_map[ch] = (character_frequency_map[ch] || 0) + 1;
     }
-    const hash = createHash('sha256').update(value).digest('hex');
+    const sha256_hash = createHash('sha256').update(value).digest('hex');
 
     return {
-      value: value,
       length,
-      wordCount,
-      palindrome,
-      uniqueChars,
-      freq,
-      hash,
+      is_palindrome,
+      unique_characters,
+      word_count,
+      sha256_hash,
+      character_frequency_map,
     };
   }
 
   getFilteredStrings(
-    palindrome?: string,
+    palindrome?: boolean,
     minLength?: number,
     maxLength?: number,
+    wordCount?: number,
     contains?: string,
   ) {
     try {
       let results = Array.from(this.stringStore.values());
 
+      const filters_applied = {
+        is_palindrome: palindrome,
+        min_length: minLength,
+        max_length: maxLength,
+        word_count: wordCount,
+        contains_character: contains,
+      };
+
       if (palindrome !== undefined) {
+        results = results.filter((r: any) => {
+          return r.properties.is_palindrome === Boolean(palindrome);
+        });
+      }
+
+      if (minLength) {
         results = results.filter(
-          (r: any) => r.palindrome === (palindrome === 'true'),
+          (r: any) => r.properties.length >= Number(minLength),
         );
       }
-      if (minLength) {
-        results = results.filter((r: any) => r.length >= Number(minLength));
-      }
+
       if (maxLength) {
-        results = results.filter((r: any) => r.length <= Number(maxLength));
+        results = results.filter(
+          (r: any) => r.properties.length <= Number(maxLength),
+        );
       }
       if (contains) {
         results = results.filter((r: any) => r.value.includes(contains));
       }
 
-      return results;
+      return {
+        data: results,
+        count: results.length,
+        filters_applied: filters_applied,
+      };
     } catch {
       throw new HttpException(
-        'Invalid query parameters',
+        'Invalid query parameter values or type',
         HttpStatus.BAD_REQUEST,
       );
     }
   }
 
-  queryStrings(q: string) {
-    if (!q) {
+  filterByNaturalLanguage(query: string) {
+    if (!query) {
       throw new HttpException('Missing query', HttpStatus.BAD_REQUEST);
     }
 
-    const lower = q.toLowerCase();
+    const lower = query.toLowerCase();
     let results = Array.from(this.stringStore.values());
+    const parsedFilters: {
+      word_count?: number;
+      is_palindrome?: boolean;
+      min_length?: number;
+      max_length?: number;
+      contains_character?: string;
+    } = {};
 
     try {
-      if (lower.includes('palindrome')) {
-        results = results.filter((r) => r.palindrome);
-      } else if (lower.includes('longer than')) {
-        const match = lower.match(/longer than (\d+)/);
-        if (!match) {
-          throw new HttpException(
-            'Invalid number in query',
-            HttpStatus.UNPROCESSABLE_ENTITY,
-          );
-        }
-        const n = parseInt(match[1]);
+      // Parse word count filter
+      if (lower.includes('single word')) {
+        parsedFilters.word_count = 1;
+        results = results.filter((r) => r.properties.word_count === 1);
+      }
+
+      // Parse palindrome filter
+      if (lower.includes('palindrome') || lower.includes('palindromic')) {
+        parsedFilters.is_palindrome = true;
+        results = results.filter((r) => r.properties.is_palindrome);
+      }
+
+      // Parse length filters
+      const longerThanMatch = lower.match(/longer than (\d+)/);
+      if (longerThanMatch) {
+        const n = parseInt(longerThanMatch[1]);
         if (isNaN(n)) {
           throw new HttpException(
             'Invalid number in query',
             HttpStatus.UNPROCESSABLE_ENTITY,
           );
         }
-        results = results.filter((r) => r.length > n);
-      } else if (lower.includes('shorter than')) {
-        const match = lower.match(/shorter than (\d+)/);
-        if (!match) {
-          throw new HttpException(
-            'Invalid number in query',
-            HttpStatus.UNPROCESSABLE_ENTITY,
-          );
-        }
-        const n = parseInt(match[1]);
+        parsedFilters.min_length = n + 1;
+        results = results.filter((r) => r.properties.length > n);
+      }
+
+      const shorterThanMatch = lower.match(/shorter than (\d+)/);
+      if (shorterThanMatch) {
+        const n = parseInt(shorterThanMatch[1]);
         if (isNaN(n)) {
           throw new HttpException(
             'Invalid number in query',
             HttpStatus.UNPROCESSABLE_ENTITY,
           );
         }
-        results = results.filter((r) => r.length < n);
-      } else if (lower.includes('single word')) {
-        results = results.filter((r) => r.wordCount === 1);
-      } else {
+        parsedFilters.max_length = n - 1;
+        results = results.filter((r) => r.properties.length < n);
+      }
+
+      // Parse character containment
+      const containsMatch = lower.match(
+        /contain(?:s|ing) (?:the )?(?:letter )?([a-z])/,
+      );
+      if (containsMatch) {
+        const char = containsMatch[1];
+        parsedFilters.contains_character = char;
+        results = results.filter((r) => r.value.includes(char));
+      }
+
+      // Special case for first vowel
+      if (lower.includes('first vowel')) {
+        const vowels = ['a', 'e', 'i', 'o', 'u'];
+        for (const vowel of vowels) {
+          if (results.some((r) => r.value.includes(vowel))) {
+            parsedFilters.contains_character = vowel;
+            results = results.filter((r) => r.value.includes(vowel));
+            break;
+          }
+        }
+      }
+
+      // Check for conflicting filters
+      if (
+        parsedFilters.min_length &&
+        parsedFilters.max_length &&
+        parsedFilters.min_length > parsedFilters.max_length
+      ) {
         throw new HttpException(
-          'Could not interpret query',
+          'Query parsed but resulted in conflicting filters',
+          HttpStatus.UNPROCESSABLE_ENTITY,
+        );
+      }
+
+      // If no filters were applied, the query couldn't be interpreted
+      if (Object.keys(parsedFilters).length === 0) {
+        throw new HttpException(
+          'Unable to parse natural language query',
           HttpStatus.BAD_REQUEST,
         );
       }
 
-      return results;
+      return {
+        data: results,
+        count: results.length,
+        interpreted_query: {
+          original: query,
+          parsed_filters: parsedFilters,
+        },
+      };
     } catch (error) {
       if (error instanceof HttpException) {
         throw error;
@@ -240,5 +313,7 @@ export class AppService {
       throw new HttpException('Not found', HttpStatus.NOT_FOUND);
     }
     this.stringStore.delete(value);
+
+    return;
   }
 }

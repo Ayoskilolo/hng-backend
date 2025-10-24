@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   Post,
   Query,
@@ -23,9 +24,31 @@ export class AppController {
     return this.appService.getMe();
   }
 
+  @Get('strings/filter-by-natural-language')
+  filterByNaturalLanguage(@Query('query') q: string) {
+    return this.appService.filterByNaturalLanguage(q);
+  }
+
+  @Get('strings')
+  getFilteredStrings(
+    @Query('is_palindrome') palindrome?: boolean,
+    @Query('min_length') minLength?: number,
+    @Query('max_length') maxLength?: number,
+    @Query('word_count') wordCount?: number,
+    @Query('contains_character') contains?: string,
+  ) {
+    return this.appService.getFilteredStrings(
+      palindrome,
+      minLength,
+      maxLength,
+      wordCount,
+      contains,
+    );
+  }
+
   @Get('strings/:value')
-  getStringAnalysis(@Param('value') value: string) {
-    return this.appService.getStringAnalysis(value);
+  getParticularString(@Param('value') value: string) {
+    return this.appService.getString(value);
   }
 
   @Post('strings')
@@ -33,27 +56,8 @@ export class AppController {
     return this.appService.analyzeStrings(value);
   }
 
-  @Get('strings')
-  getFilteredStrings(
-    @Query('palindrome') palindrome?: string,
-    @Query('minLength') minLength?: number,
-    @Query('maxLength') maxLength?: number,
-    @Query('contains') contains?: string,
-  ) {
-    return this.appService.getFilteredStrings(
-      palindrome,
-      minLength,
-      maxLength,
-      contains,
-    );
-  }
-
-  @Get('query')
-  queryStrings(@Query('q') q: string) {
-    return this.appService.queryStrings(q);
-  }
-
   @Delete('strings/:value')
+  @HttpCode(204)
   deleteString(@Param('value') value: string) {
     return this.appService.deleteString(value);
   }
