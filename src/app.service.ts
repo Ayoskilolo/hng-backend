@@ -5,20 +5,6 @@ import { CatFact } from './model/cat.model';
 import { AxiosResponse } from 'axios';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
-import {
-  NaturalLanguageResponse,
-  ParsedFilters,
-} from './dto/natural-language-response.dto';
-
-interface StringAnalysis {
-  value: string;
-  length: number;
-  wordCount: number;
-  palindrome: boolean;
-  uniqueChars: number;
-  freq: { [key: string]: number };
-  hash: string;
-}
 
 @Injectable()
 export class AppService {

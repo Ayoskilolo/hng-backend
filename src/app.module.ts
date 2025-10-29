@@ -2,18 +2,29 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { HttpModule } from '@nestjs/axios';
-import { ConfigModule } from '@nestjs/config';
-// import * as Joi from 'joi';
-import catConfig from 'config/cat.config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { CountryModule } from './country/country.module';
+import config from './config/configuration';
+import databaseConfig from './config/database.config';
 
 @Module({
   imports: [
-    HttpModule.register({ timeout: 5000 }),
-    ConfigModule.forRoot({
-      // validationSchema: Joi.object({ catAPI: Joi.string().uri().required() }),
-      isGlobal: true,
-      load: [catConfig],
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => {
+        const db = configService.get('database') as Record<string, unknown>;
+        return db;
+      },
+      inject: [ConfigService],
     }),
+
+    HttpModule,
+    ConfigModule.forRoot({
+      isGlobal: true,
+      load: [config, databaseConfig],
+    }),
+    CountryModule,
   ],
   controllers: [AppController],
   providers: [AppService],
